@@ -4,111 +4,129 @@ An MCP server that lets Claude Code read conversations from Claude Desktop and c
 
 ## Why Use This?
 
-### 1. Reference specs and context across apps
+### 1. Conversations are richer than documents
 
-You discussed a feature spec in Claude Desktop → Claude Code can read that conversation and implement it directly. No copy-pasting needed.
+When Claude Code reads a conversation, it doesn't just get the final spec—it gets the **entire thought process**:
 
-### 2. Keep Claude Code lightweight
+- Questions that were asked and clarified
+- - Alternatives that were considered and rejected
+  - - Trade-offs that were discussed
+    - - The reasoning behind each decision
+      - - Failed approaches and why they didn't work
+       
+        - This helps Claude Code understand not just *what* to build but *why*, leading to better implementation choices.
+       
+        - ### 2. No context window waste
+       
+        - Instead of re-explaining your project, domain, and constraints to Claude Code every session, it can read the conversation where you already explained everything. Your accumulated context is preserved.
+       
+        - ### 3. Claude Desktop as your "context hub"
+       
+        - Instead of configuring many MCP servers in Claude Code (Confluence, Jira, Slack, browser extensions...), you can:
+       
+        - - Configure all integrations in **Claude Desktop**
+          - - Have conversations that use those tools
+            - - **Claude Code reads those conversations** → indirect access to all that context
+             
+              - This keeps Claude Code lightweight and fast, while Claude Desktop handles deep integrations.
+             
+              - ### 4. Async workflow
+             
+              - Design and discuss in Claude Desktop during a meeting or brainstorm. Later, Claude Code picks up that conversation and implements it—no manual handoff needed.
+             
+              - ### 5. Artifacts and iterations included
+             
+              - Conversations often contain code snippets, structured outputs, and multiple iterations. Claude Code sees what was tried, what worked, and the final version—not just the end result.
+             
+              - ### 6. Bridge your knowledge
+             
+              - Search past conversations where you solved similar problems. Your conversation history becomes a searchable knowledge base.
+             
+              - ## Features
+             
+              - - **list_conversations** - List recent conversations with names and timestamps
+                - - **get_conversation** - Get full content of a specific conversation
+                  - - **search_conversations** - Search conversations by name/title
+                    - - **get_conversation_summary** - Get first/last messages for quick context
+                     
+                      - ## Requirements
+                     
+                      - - Python 3.10+
+                        - - Chrome browser logged into claude.ai
+                         
+                          - ## Installation
+                         
+                          - ### For Claude Code
+                         
+                          - 1. Clone this repository:
+                            2. ```bash
+                               git clone https://github.com/ammardoosh/claude-desktop-reader-mcp.git
+                               cd claude-desktop-reader-mcp
+                               ```
 
-Instead of configuring many MCP servers in Claude Code (Confluence, Jira, Slack, browser extensions...), you can:
+                               2. Install dependencies:
+                               3. ```bash
+                                  pip install -r requirements.txt
+                                  ```
 
-- Configure all your MCP servers in **Claude Desktop** (your "context hub")
-- - Have conversations in Claude Desktop that use those tools
-  - - **Claude Code reads those conversations** → gets indirect access to all that context
-   
-    - This keeps Claude Code fast and focused on coding, while Claude Desktop handles deep integrations.
-   
-    - ### 3. Bridge your conversation history
-   
-    - Search and retrieve past conversations where you solved similar problems, discussed architecture decisions, or prototyped ideas.
-   
-    - ## Features
-   
-    - - **list_conversations** - List recent conversations with names and timestamps
-      - - **get_conversation** - Get full content of a specific conversation
-        - - **search_conversations** - Search conversations by name/title
-          - - **get_conversation_summary** - Get first/last messages for quick context
-           
-            - ## Requirements
-           
-            - - Python 3.10+
-              - - Chrome browser logged into claude.ai
-               
-                - ## Installation
-               
-                - ### For Claude Code
-               
-                - 1. Clone this repository:
-                  2. ```bash
-                     git clone https://github.com/ammardoosh/claude-desktop-reader-mcp.git
-                     cd claude-desktop-reader-mcp
-                     ```
+                                  3. Add to your Claude Code MCP settings (`~/.claude.json`):
+                                  4. ```json
+                                     {
+                                       "mcpServers": {
+                                         "claude-desktop-reader": {
+                                           "type": "stdio",
+                                           "command": "python3",
+                                           "args": ["/path/to/claude-desktop-reader-mcp/server.py"]
+                                         }
+                                       }
+                                     }
+                                     ```
 
-                     2. Install dependencies:
-                     3. ```bash
-                        pip install -r requirements.txt
-                        ```
+                                     ### For Claude Desktop
 
-                        3. Add to your Claude Code MCP settings (`~/.claude.json`):
-                        4. ```json
-                           {
-                             "mcpServers": {
-                               "claude-desktop-reader": {
-                                 "type": "stdio",
-                                 "command": "python3",
-                                 "args": ["/path/to/claude-desktop-reader-mcp/server.py"]
-                               }
-                             }
-                           }
-                           ```
+                                     Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
-                           ### For Claude Desktop
+                                     ```json
+                                     {
+                                       "mcpServers": {
+                                         "claude-desktop-reader": {
+                                           "command": "python3",
+                                           "args": ["/path/to/claude-desktop-reader-mcp/server.py"]
+                                         }
+                                       }
+                                     }
+                                     ```
 
-                           Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+                                     ## Usage
 
-                           ```json
-                           {
-                             "mcpServers": {
-                               "claude-desktop-reader": {
-                                 "command": "python3",
-                                 "args": ["/path/to/claude-desktop-reader-mcp/server.py"]
-                               }
-                             }
-                           }
-                           ```
+                                     ```python
+                                     # List recent conversations
+                                     list_conversations(limit=10)
 
-                           ## Usage
+                                     # Get full conversation
+                                     get_conversation("conversation-uuid")
 
-                           Once installed, the tools are available automatically:
+                                     # Search by name
+                                     search_conversations("project planning")
 
-                           ```python
-                           # List your recent Claude conversations
-                           list_conversations(limit=10)
+                                     # Get summary (first/last messages)
+                                     get_conversation_summary("conversation-uuid")
+                                     ```
 
-                           # Get a specific conversation by ID
-                           get_conversation("conversation-uuid")
+                                     ## How It Works
 
-                           # Search by name
-                           search_conversations("project planning")
+                                     The server reads Chrome's cookies to authenticate with claude.ai's API:
 
-                           # Get a summary (first/last messages)
-                           get_conversation_summary("conversation-uuid")
-                           ```
-
-                           ## How It Works
-
-                           The server reads Chrome's cookies to authenticate with claude.ai's API:
-
-                           1. You must be logged into claude.ai in Chrome
-                           2. 2. Conversations from both Claude Desktop and claude.ai web are accessible
-                              3. 3. No API keys or manual authentication needed
-                                
-                                 4. ## Limitations
-                                
-                                 5. - **Read-only** - Only reads conversations (no writing/modifying)
-                                    - - **Chrome only** - Requires Chrome browser (Safari/Firefox not supported)
-                                      - - **Session expiry** - Re-login to Chrome when session expires
-                                       
-                                        - ## License
-                                       
-                                        - MIT
+                                     1. You must be logged into claude.ai in Chrome
+                                     2. 2. Conversations from both Claude Desktop and claude.ai web are accessible
+                                        3. 3. No API keys needed
+                                          
+                                           4. ## Limitations
+                                          
+                                           5. - **Read-only** - Only reads conversations (no writing/modifying)
+                                              - - **Chrome only** - Requires Chrome (Safari/Firefox not supported)
+                                                - - **Session expiry** - Re-login to Chrome when session expires
+                                                 
+                                                  - ## License
+                                                 
+                                                  - MIT
