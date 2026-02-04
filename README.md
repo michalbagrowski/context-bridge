@@ -6,31 +6,29 @@ An MCP server that lets Claude Code read conversations from Claude Desktop and c
 
 ### 1. Conversations are richer than documents
 
-When Claude Code reads a conversation, it doesn't just get the final spec—it gets the **entire thought process**:
+Helps Claude Code go from a copy/pasted spec or document to reading an entire conversation in Claude Desktop. This should leader to better code due to:
 
 - Questions that were asked and clarified
-- - Alternatives that were considered and rejected
-  - - Trade-offs that were discussed
-    - - The reasoning behind each decision
-      - - Failed approaches and why they didn't work
+- Alternatives that were considered and rejected
+- Trade-offs that were discussed
+- The reasoning behind decisions
+- Previously attempted approaches and why they didn't work
+
+This helps Claude Code understand not just *what* to build but *why*, leading to better implementation choices.
        
-        - This helps Claude Code understand not just *what* to build but *why*, leading to better implementation choices.
+### 2. No context window waste
        
-        - ### 2. No context window waste
+- Instead of re-explaining your project, domain, and constraints to Claude Code every session, it can read the conversation where you already explained everything. Your accumulated context is preserved.
        
-        - Instead of re-explaining your project, domain, and constraints to Claude Code every session, it can read the conversation where you already explained everything. Your accumulated context is preserved.
+- ### 3. Claude Desktop as your "context hub"
        
-        - ### 3. Claude Desktop as your "context hub"
-       
-        - Instead of configuring many MCP servers in Claude Code (Confluence, Jira, Slack, browser extensions...), you can:
-       
-        - - Configure all integrations in **Claude Desktop**
-          - - Have conversations that use those tools
-            - - **Claude Code reads those conversations** → indirect access to all that context
+- Instead of configuring many MCP servers in Claude Code (Confluence, Jira, Slack, browser extensions...), you can:
+- Configure all integrations in **Claude Desktop**
+- Have conversations that use those tools
+-  **Claude Code reads those conversations** → indirect access to all that context
+- This keeps Claude Code lightweight and fast, while Claude Desktop handles deep integrations.
              
-              - This keeps Claude Code lightweight and fast, while Claude Desktop handles deep integrations.
-             
-              - ### 4. Async workflow
+             - ### 4. Async workflow
              
               - Design and discuss in Claude Desktop during a meeting or brainstorm. Later, Claude Code picks up that conversation and implements it—no manual handoff needed.
              
