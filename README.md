@@ -1,4 +1,4 @@
-# Claude Desktop Reader MCP Server
+# Context Bridge
 
 An MCP server that lets Claude Code read conversations from Claude Desktop and claude.ai.
 
@@ -59,24 +59,27 @@ When Claude Code reads a conversation, it doesn't just get the final spec—it g
                           - ### For Claude Code
                          
                           - 1. Clone this repository:
+                           
                             2. ```bash
-                               git clone https://github.com/ammardoosh/claude-desktop-reader-mcp.git
-                               cd claude-desktop-reader-mcp
+                               git clone https://github.com/ammardoosh/context-bridge.git
+                               cd context-bridge
                                ```
 
                                2. Install dependencies:
+                              
                                3. ```bash
                                   pip install -r requirements.txt
                                   ```
 
                                   3. Add to your Claude Code MCP settings (`~/.claude.json`):
+                                 
                                   4. ```json
                                      {
                                        "mcpServers": {
-                                         "claude-desktop-reader": {
+                                         "context-bridge": {
                                            "type": "stdio",
                                            "command": "python3",
-                                           "args": ["/path/to/claude-desktop-reader-mcp/server.py"]
+                                           "args": ["/path/to/context-bridge/server.py"]
                                          }
                                        }
                                      }
@@ -89,9 +92,9 @@ When Claude Code reads a conversation, it doesn't just get the final spec—it g
                                      ```json
                                      {
                                        "mcpServers": {
-                                         "claude-desktop-reader": {
+                                         "context-bridge": {
                                            "command": "python3",
-                                           "args": ["/path/to/claude-desktop-reader-mcp/server.py"]
+                                           "args": ["/path/to/context-bridge/server.py"]
                                          }
                                        }
                                      }
