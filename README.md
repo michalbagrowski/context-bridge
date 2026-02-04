@@ -6,7 +6,7 @@ An MCP server that lets Claude Code read conversations from Claude Desktop and c
 
 ### 1. Conversations are richer than documents
 
-When Claude Code reads a conversation, it doesn't just get the final spec—it gets the **entire thought process**:
+Let Claude Code read a conversation including the entire thought process + back-and-forth instead of just a copy/pasted final spec:
 
 - Questions that were asked and clarified
 - Alternatives that were considered and rejected
