@@ -82,7 +82,7 @@ Configure all integrations (Confluence, Jira, Slack, browser extensions) in Clau
 1. Clone this repository:
 
 ```bash
-git clone https://github.com/ammardoosh/claude-memory.git
+git clone https://github.com/AmmarJawad/claude-memory.git
 cd claude-memory
 ```
 
