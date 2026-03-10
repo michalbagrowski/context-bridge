@@ -1,3 +1,4 @@
 mcp[cli]>=1.0.0
 browser-cookie3>=0.20.0
 curl-cffi>=0.5.0
+pytest>=7.0.0
