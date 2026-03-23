@@ -55,3 +55,6 @@ htmlcov/
 
 # mypy
 .mypy_cache/
+
+# Claude project cache
+.claude-project-cache

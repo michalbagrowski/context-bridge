@@ -1,246 +1,229 @@
 #!/usr/bin/env python3
 """
-MCP Server for reading Claude Desktop/Web conversations.
-Allows Claude Code to reference chats from Claude.ai.
+MCP Server for bidirectional Claude.ai context bridge.
 
-Uses Chrome browser cookies to authenticate with Claude.ai API.
-Requires being logged into claude.ai in Chrome.
+Reads conversations and Project knowledge from claude.ai.
+Pushes status, TODOs, and session logs back to claude.ai Projects.
 """
 
 import json
+import re
 
-import browser_cookie3
-from curl_cffi import requests
 from mcp.server.fastmcp import FastMCP
 
-# Initialize FastMCP server
-mcp = FastMCP("claude-desktop-reader")
+from context_bridge.conversations_api import (
+    list_conversations,
+    get_conversation,
+    search_conversations,
+    get_conversation_summary,
+)
+from context_bridge.projects_api import ProjectsAPI
+from context_bridge.config import ProjectConfig
+from context_bridge.content_generator import ContentGenerator
 
-CLAUDE_API_BASE = "https://claude.ai/api"
+mcp = FastMCP("context-bridge")
 
+# Register conversation tools (unchanged)
+mcp.tool()(list_conversations)
+mcp.tool()(get_conversation)
+mcp.tool()(search_conversations)
+mcp.tool()(get_conversation_summary)
 
-def get_all_cookies() -> str:
-    """Get all Claude cookies formatted as a cookie header."""
-    try:
-        cj = browser_cookie3.chrome(domain_name='.claude.ai')
-        cookies = []
-        for cookie in cj:
-            cookies.append(f"{cookie.name}={cookie.value}")
-        return "; ".join(cookies)
-    except Exception as e:
-        raise RuntimeError(f"Could not get cookies from Chrome: {e}")
-
-
-def make_api_request(endpoint: str) -> dict:
-    """Make an authenticated request to Claude API."""
-    cookie_header = get_all_cookies()
-
-    url = f"{CLAUDE_API_BASE}/{endpoint}"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': 'https://claude.ai/chats',
-        'Content-Type': 'application/json',
-        'Cookie': cookie_header
-    }
-
-    response = requests.get(url, headers=headers, impersonate="chrome120")
-
-    if response.status_code != 200:
-        raise RuntimeError(f"API request failed: {response.status_code} - {response.text[:200]}")
-
-    return response.json()
+# Shared instances
+_projects = ProjectsAPI()
 
 
-def get_organization_id() -> str:
-    """Get the user's personal organization ID."""
-    orgs = make_api_request("organizations")
-    if not orgs:
-        raise RuntimeError("No organizations found")
+def _resolve_project_id(project: str = None) -> str:
+    """Resolve project ID from argument, config, or cache."""
+    if project:
+        if re.match(
+            r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+            project,
+            re.I,
+        ):
+            return project
+        resolved = _projects.resolve_project_id(project)
+        if resolved:
+            return resolved
+        raise ValueError(f"Project '{project}' not found")
 
-    # Try to find personal org (contains user's email or "Organization" suffix)
-    for org in orgs:
-        name = org.get('name', '')
-        # Personal orgs typically have format "email's Organization"
-        if "'s Organization" in name or "@" in name:
-            return org['uuid']
-
-    # Fallback: try each org and return first one that works
-    cookie_header = get_all_cookies()
-    for org in orgs:
-        org_id = org['uuid']
-        try:
-            url = f"{CLAUDE_API_BASE}/organizations/{org_id}/chat_conversations"
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-                'Accept': 'application/json',
-                'Referer': 'https://claude.ai/chats',
-                'Cookie': cookie_header
-            }
-            response = requests.get(url, headers=headers, impersonate="chrome120")
-            if response.status_code == 200:
-                return org_id
-        except Exception:
-            continue
-
-    # Last resort: return first org
-    return orgs[0]['uuid']
+    config = ProjectConfig()
+    if config.project_id:
+        return config.project_id
+    if config.cached_project_id:
+        return config.cached_project_id
+    if config.project_name:
+        resolved = _projects.resolve_project_id(config.project_name)
+        if resolved:
+            config.save_cached_project_id(resolved)
+            return resolved
+        raise ValueError(
+            f"Project '{config.project_name}' from CLAUDE.md not found on claude.ai. "
+            "Create it first or use an explicit project ID."
+        )
+    raise ValueError(
+        "No project configured. Add <!-- claude-project: Name --> to CLAUDE.md "
+        "or pass the project parameter explicitly."
+    )
 
 
 @mcp.tool()
-def list_conversations(limit: int = 20) -> str:
+def list_projects() -> str:
     """
-    List recent conversations from Claude.ai.
+    List all claude.ai Projects in your organization.
 
-    Retrieves conversations you've had in Claude Desktop or claude.ai web.
-    Requires being logged into claude.ai in Chrome browser.
+    Returns:
+        JSON list of projects with id, name, and description
+    """
+    return _projects.list_projects()
+
+
+@mcp.tool()
+def list_project_docs(project: str = "") -> str:
+    """
+    List knowledge documents in a claude.ai Project.
 
     Args:
-        limit: Maximum number of conversations to return (default 20)
+        project: Project name or UUID. If empty, resolved from CLAUDE.md config.
+
+    Returns:
+        JSON list of documents with id, file_name, and created_at
+    """
+    try:
+        project_id = _resolve_project_id(project or None)
+        return _projects.list_project_docs(project_id)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def get_project_doc(doc_id: str, project: str = "") -> str:
+    """
+    Read a specific knowledge document from a claude.ai Project.
+
+    Use list_project_docs first to find available documents.
+
+    Args:
+        doc_id: The UUID of the document to read
+        project: Project name or UUID. If empty, resolved from CLAUDE.md config.
+
+    Returns:
+        JSON with document id, file_name, content, and created_at
+    """
+    try:
+        project_id = _resolve_project_id(project or None)
+        return _projects.get_project_doc(project_id, doc_id)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def list_project_conversations(project: str = "") -> str:
+    """
+    List conversations within a claude.ai Project.
+
+    Args:
+        project: Project name or UUID. If empty, resolved from CLAUDE.md config.
 
     Returns:
         JSON list of conversations with id, name, and timestamps
     """
     try:
-        org_id = get_organization_id()
-        conversations = make_api_request(f"organizations/{org_id}/chat_conversations")
-
-        result = []
-        for conv in conversations[:limit]:
-            result.append({
-                "id": conv.get("uuid"),
-                "name": conv.get("name") or "Untitled",
-                "created_at": conv.get("created_at"),
-                "updated_at": conv.get("updated_at")
-            })
-
-        return json.dumps(result, indent=2)
-
+        project_id = _resolve_project_id(project or None)
+        return _projects.list_project_conversations(project_id)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
-def get_conversation(conversation_id: str) -> str:
+def push_to_project(content: str, doc_name: str, project: str = "") -> str:
     """
-    Get the full content of a specific conversation from Claude.ai.
+    Push arbitrary content as a knowledge document to a claude.ai Project.
 
-    Use list_conversations first to find the conversation ID.
+    Creates or replaces the document if one with the same name exists.
 
     Args:
-        conversation_id: The UUID of the conversation to retrieve
+        content: Markdown content to push
+        doc_name: Name for the document (e.g., 'design-notes.md')
+        project: Project name or UUID. If empty, resolved from CLAUDE.md config.
 
     Returns:
-        JSON with conversation details and all messages
+        JSON with the created document info
     """
     try:
-        org_id = get_organization_id()
-        conversation = make_api_request(
-            f"organizations/{org_id}/chat_conversations/{conversation_id}"
+        project_id = _resolve_project_id(project or None)
+        result = _projects.upsert_doc(project_id, doc_name, content)
+        return json.dumps(
+            {
+                "status": "success",
+                "doc_id": result.get("uuid"),
+                "file_name": doc_name,
+            },
+            indent=2,
         )
-
-        messages = []
-        for msg in conversation.get("chat_messages", []):
-            messages.append({
-                "role": msg.get("sender"),
-                "content": msg.get("text", ""),
-                "created_at": msg.get("created_at")
-            })
-
-        result = {
-            "id": conversation.get("uuid"),
-            "name": conversation.get("name") or "Untitled",
-            "created_at": conversation.get("created_at"),
-            "messages": messages
-        }
-
-        return json.dumps(result, indent=2)
-
     except Exception as e:
         return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
-def search_conversations(query: str, limit: int = 10) -> str:
+def push_session_summary(project: str = "") -> str:
     """
-    Search conversations by name/title from Claude.ai.
+    Auto-generate and push a status summary to a claude.ai Project.
+
+    Generates content from git state: recent commits, current branch, diff stats.
 
     Args:
-        query: Search term to match against conversation names
-        limit: Maximum number of results to return
+        project: Project name or UUID. If empty, resolved from CLAUDE.md config.
 
     Returns:
-        JSON list of matching conversations
+        JSON with push result
     """
     try:
-        org_id = get_organization_id()
-        conversations = make_api_request(f"organizations/{org_id}/chat_conversations")
-
-        query_lower = query.lower()
-        matches = []
-
-        for conv in conversations:
-            name = conv.get("name") or ""
-            if query_lower in name.lower():
-                matches.append({
-                    "id": conv.get("uuid"),
-                    "name": name or "Untitled",
-                    "created_at": conv.get("created_at")
-                })
-
-                if len(matches) >= limit:
-                    break
-
-        return json.dumps(matches, indent=2)
-
-    except Exception as e:
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-def get_conversation_summary(conversation_id: str) -> str:
-    """
-    Get a condensed summary of a conversation (first and last few messages).
-
-    Useful for getting context without loading the entire conversation.
-
-    Args:
-        conversation_id: The UUID of the conversation
-
-    Returns:
-        JSON with conversation name and summarized messages
-    """
-    try:
-        org_id = get_organization_id()
-        conversation = make_api_request(
-            f"organizations/{org_id}/chat_conversations/{conversation_id}"
+        project_id = _resolve_project_id(project or None)
+        config = ProjectConfig()
+        gen = ContentGenerator(repo_name=config.repo_name)
+        content = gen.generate_status()
+        doc_name = gen.status_doc_name()
+        result = _projects.upsert_doc(project_id, doc_name, content)
+        return json.dumps(
+            {
+                "status": "success",
+                "doc_id": result.get("uuid"),
+                "file_name": doc_name,
+            },
+            indent=2,
         )
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
-        all_messages = conversation.get("chat_messages", [])
 
-        # Get first 3 and last 3 messages
-        if len(all_messages) <= 6:
-            summary_messages = all_messages
-        else:
-            summary_messages = all_messages[:3] + [{"text": f"... ({len(all_messages) - 6} messages omitted) ...", "sender": "system"}] + all_messages[-3:]
+@mcp.tool()
+def push_todos(todos: list[str], project: str = "") -> str:
+    """
+    Push a TODO list to a claude.ai Project.
 
-        messages = []
-        for msg in summary_messages:
-            messages.append({
-                "role": msg.get("sender"),
-                "content": msg.get("text", "")[:500] + ("..." if len(msg.get("text", "")) > 500 else ""),
-            })
+    Args:
+        todos: List of TODO items. Prefix with '[x]' for completed items.
+        project: Project name or UUID. If empty, resolved from CLAUDE.md config.
 
-        result = {
-            "id": conversation.get("uuid"),
-            "name": conversation.get("name") or "Untitled",
-            "total_messages": len(all_messages),
-            "messages": messages
-        }
-
-        return json.dumps(result, indent=2)
-
+    Returns:
+        JSON with push result
+    """
+    try:
+        project_id = _resolve_project_id(project or None)
+        config = ProjectConfig()
+        gen = ContentGenerator(repo_name=config.repo_name)
+        content = gen.generate_todos(todos)
+        doc_name = gen.todos_doc_name()
+        result = _projects.upsert_doc(project_id, doc_name, content)
+        return json.dumps(
+            {
+                "status": "success",
+                "doc_id": result.get("uuid"),
+                "file_name": doc_name,
+            },
+            indent=2,
+        )
     except Exception as e:
         return json.dumps({"error": str(e)})
 

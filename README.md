@@ -1,6 +1,6 @@
 # Context Bridge
 
-An MCP server that lets Claude Code read conversations from Claude Desktop and claude.ai.
+A bidirectional MCP server that connects Claude Code with claude.ai conversations and Projects. Read conversations, search your history, and push context back to claude.ai Projects as knowledge documents.
 
 ## Why Use This?
 
@@ -26,17 +26,17 @@ Instead of configuring many MCP servers in Claude Code (Confluence, Jira, Slack,
 
 - Configure all integrations in **Claude Desktop**
 - Have conversations that use those tools
-- **Claude Code reads those conversations** → indirect access to all that context
+- **Claude Code reads those conversations** — indirect access to all that context
 
 This keeps Claude Code lightweight and fast, while Claude Desktop handles deep integrations.
 
-### 4. Async workflow
+### 4. Bidirectional sync with Projects
 
-Design and discuss in Claude Desktop during a meeting or brainstorm. Later, Claude Code picks up that conversation and implements it—no manual handoff needed.
+Push status summaries, TODO lists, and session logs from Claude Code back to claude.ai Projects. Your Claude Desktop conversations automatically have access to the latest project state.
 
-### 5. Artifacts and iterations included
+### 5. Async workflow
 
-Conversations often contain code snippets, structured outputs, and multiple iterations. Claude Code sees what was tried, what worked, and the final version—not just the end result.
+Design and discuss in Claude Desktop during a meeting or brainstorm. Later, Claude Code picks up that conversation and implements it—no manual handoff needed. Push results back so the next Desktop session sees what was done.
 
 ### 6. Bridge your knowledge
 
@@ -44,10 +44,22 @@ Search past conversations where you solved similar problems. Your conversation h
 
 ## Features
 
+### Read (conversations)
+
 - **list_conversations** - List recent conversations with names and timestamps
 - **get_conversation** - Get full content of a specific conversation
 - **search_conversations** - Search conversations by name/title
 - **get_conversation_summary** - Get first/last messages for quick context
+
+### Read/Write (Projects)
+
+- **list_projects** - List all claude.ai Projects in your organization
+- **list_project_docs** - List knowledge documents in a Project
+- **get_project_doc** - Read a specific knowledge document
+- **list_project_conversations** - List conversations within a Project
+- **push_to_project** - Push arbitrary content as a knowledge document
+- **push_session_summary** - Auto-generate and push a status summary (git state, recent changes)
+- **push_todos** - Push a TODO list as a knowledge document
 
 ## Requirements
 
@@ -55,8 +67,6 @@ Search past conversations where you solved similar problems. Your conversation h
 - Chrome browser logged into claude.ai
 
 ## Installation
-
-### For Claude Code
 
 1. Clone this repository:
 
@@ -85,9 +95,7 @@ pip install -r requirements.txt
 }
 ```
 
-### For Claude Desktop
-
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+For Claude Desktop, add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
 
 ```json
 {
@@ -100,20 +108,66 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
+## Project Mapping
+
+To enable push features, map your repository to a claude.ai Project by adding an HTML comment to your `CLAUDE.md`:
+
+```markdown
+<!-- claude-project: My App Name -->
+```
+
+The server resolves the project name to a project ID on first use and caches it in `.claude-project-cache` (add this to `.gitignore`).
+
+You can also set the project ID directly if you know it:
+
+```markdown
+<!-- claude-project-id: your-project-uuid -->
+```
+
+Multiple repositories can map to the same Project — documents are prefixed with the repo name to avoid collisions.
+
+## Automation (Hooks)
+
+Auto-push a status summary after each Claude Code session using the push CLI:
+
+```bash
+python -m context_bridge.push --auto
+```
+
+This generates a summary from your git state (branch, recent commits, modified files) and pushes it to the configured Project. A cooldown mechanism prevents excessive pushes.
+
+To wire this into Claude Code's `SessionEnd` hook, add to `.claude/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "command": "python -m context_bridge.push --auto",
+        "timeout": 10000
+      }
+    ]
+  }
+}
+```
+
 ## Usage
 
 ```python
-# List recent conversations
+# Read conversations
 list_conversations(limit=10)
-
-# Get full conversation
 get_conversation("conversation-uuid")
-
-# Search by name
 search_conversations("project planning")
 
-# Get summary (first/last messages)
-get_conversation_summary("conversation-uuid")
+# Browse Projects
+list_projects()
+list_project_docs(project="My App")
+get_project_doc(doc_id="doc-uuid")
+
+# Push context back
+push_to_project(content="# Design Notes\n...", doc_name="design-notes")
+push_session_summary()
+push_todos(todos=["Fix auth bug", "Add tests", "Update docs"])
 ```
 
 ## How It Works
@@ -126,7 +180,6 @@ The server reads Chrome's cookies to authenticate with claude.ai's API:
 
 ## Limitations
 
-- **Read-only** - Only reads conversations (no writing/modifying)
 - **Chrome only** - Requires Chrome (Safari/Firefox not supported)
 - **Session expiry** - Re-login to Chrome when session expires
 
