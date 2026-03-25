@@ -1018,5 +1018,193 @@ def get_conversation_summary(conversation_id: str, refresh: bool = False) -> str
         return json.dumps({"error": str(e)})
 
 
+# ── claude.ai Project tools ───────────────────────────────────────────────────
+# Guarded import: if context_bridge is not installed, project tools are skipped
+# and all pre-existing tools continue to work.
+
+try:
+    from context_bridge.projects_api import ProjectsAPI
+    from context_bridge.config import ProjectConfig
+    from context_bridge.content_generator import ContentGenerator
+    _PROJECTS_AVAILABLE = True
+except ImportError:
+    _PROJECTS_AVAILABLE = False
+
+_projects_api = ProjectsAPI() if _PROJECTS_AVAILABLE else None
+
+
+def _resolve_project_id(project: str = None) -> str:
+    """Resolve project ID from argument, config, or cache."""
+    if project:
+        import re as _re
+        if _re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', project, _re.I):
+            return project
+        resolved = _projects_api.resolve_project_id(project)
+        if resolved:
+            return resolved
+        raise ValueError(f"Project '{project}' not found")
+
+    config = ProjectConfig()
+    if config.project_id:
+        return config.project_id
+    if config.cached_project_id:
+        return config.cached_project_id
+    if config.project_name:
+        resolved = _projects_api.resolve_project_id(config.project_name)
+        if resolved:
+            config.save_cached_project_id(resolved)
+            return resolved
+        raise ValueError(
+            f"Project '{config.project_name}' from CLAUDE.md not found on claude.ai. "
+            "Create it first or use an explicit project ID."
+        )
+    raise ValueError(
+        "No project configured. Add <!-- claude-project: Name --> to CLAUDE.md "
+        "or pass the project parameter explicitly."
+    )
+
+
+if not _PROJECTS_AVAILABLE:
+    import sys
+    print("context_bridge package not found — project sync tools disabled", file=sys.stderr)
+
+
+def list_projects() -> str:
+    """
+    List all claude.ai Projects in your organization.
+
+    Returns:
+        JSON list of projects with id, name, and description
+    """
+    return _projects_api.list_projects()
+
+
+def list_project_docs(project: str = "") -> str:
+    """
+    List knowledge documents in a claude.ai Project.
+
+    Args:
+        project: Project name or UUID. If empty, resolved from CLAUDE.md config.
+
+    Returns:
+        JSON list of documents with id, file_name, and created_at
+    """
+    try:
+        project_id = _resolve_project_id(project or None)
+        return _projects_api.list_project_docs(project_id)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def get_project_doc(doc_id: str, project: str = "") -> str:
+    """
+    Read a specific knowledge document from a claude.ai Project.
+
+    Use list_project_docs first to find available documents.
+
+    Args:
+        doc_id: The UUID of the document to read
+        project: Project name or UUID. If empty, resolved from CLAUDE.md config.
+
+    Returns:
+        JSON with document id, file_name, content, and created_at
+    """
+    try:
+        project_id = _resolve_project_id(project or None)
+        return _projects_api.get_project_doc(project_id, doc_id)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def push_to_project(content: str, doc_name: str, project: str = "") -> str:
+    """
+    Push arbitrary content as a knowledge document to a claude.ai Project.
+
+    Creates or replaces the document if one with the same name exists.
+
+    Args:
+        content: Markdown content to push
+        doc_name: Name for the document (e.g., 'design-notes.md')
+        project: Project name or UUID. If empty, resolved from CLAUDE.md config.
+
+    Returns:
+        JSON with the created document info
+    """
+    try:
+        project_id = _resolve_project_id(project or None)
+        result = _projects_api.upsert_doc(project_id, doc_name, content)
+        return json.dumps({
+            "status": "success",
+            "doc_id": result.get("uuid"),
+            "file_name": doc_name,
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def push_session_summary(project: str = "") -> str:
+    """
+    Auto-generate and push a status summary to a claude.ai Project.
+
+    Generates content from git state: recent commits, current branch, diff stats.
+
+    Args:
+        project: Project name or UUID. If empty, resolved from CLAUDE.md config.
+
+    Returns:
+        JSON with push result
+    """
+    try:
+        project_id = _resolve_project_id(project or None)
+        config = ProjectConfig()
+        gen = ContentGenerator(repo_name=config.repo_name)
+        content = gen.generate_status()
+        doc_name = gen.status_doc_name()
+        result = _projects_api.upsert_doc(project_id, doc_name, content)
+        return json.dumps({
+            "status": "success",
+            "doc_id": result.get("uuid"),
+            "file_name": doc_name,
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def push_todos(todos: list[str], project: str = "") -> str:
+    """
+    Push a TODO list to a claude.ai Project.
+
+    Args:
+        todos: List of TODO items. Prefix with '[x]' for completed items.
+        project: Project name or UUID. If empty, resolved from CLAUDE.md config.
+
+    Returns:
+        JSON with push result
+    """
+    try:
+        project_id = _resolve_project_id(project or None)
+        config = ProjectConfig()
+        gen = ContentGenerator(repo_name=config.repo_name)
+        content = gen.generate_todos(todos)
+        doc_name = gen.todos_doc_name()
+        result = _projects_api.upsert_doc(project_id, doc_name, content)
+        return json.dumps({
+            "status": "success",
+            "doc_id": result.get("uuid"),
+            "file_name": doc_name,
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+if _PROJECTS_AVAILABLE:
+    mcp.tool()(list_projects)
+    mcp.tool()(list_project_docs)
+    mcp.tool()(get_project_doc)
+    mcp.tool()(push_to_project)
+    mcp.tool()(push_session_summary)
+    mcp.tool()(push_todos)
+
+
 if __name__ == "__main__":
     mcp.run()

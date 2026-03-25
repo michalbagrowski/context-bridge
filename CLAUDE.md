@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-**claude-memory** — a single-file MCP server (`server.py`) that gives Claude Code persistent memory across terminal restarts and context-window compaction, and provides targeted access to relevant claude.ai conversations.
+**claude-memory** — an MCP server (`server.py` + `context_bridge/` package) that gives Claude Code persistent memory across terminal restarts and context-window compaction, targeted access to relevant claude.ai conversations, and bidirectional sync with claude.ai Projects.
 
 ## Commands
 
@@ -18,11 +18,14 @@ python3 server.py
 # Test tools interactively
 python3 -m mcp dev server.py
 
-# Run tests
-pytest test_server.py -v
+# Run all tests
+pytest test_server.py tests/ -v
+
+# Run project sync CLI
+python -m context_bridge --auto
 ```
 
-No build step, no packages — the entire server is `server.py`. Tests are in `test_server.py`.
+Core server is `server.py`. Project sync lives in `context_bridge/` package. Tests in `test_server.py` (local storage) and `tests/` (project sync).
 
 ## Hard constraint — no LLM inference in server.py
 
@@ -30,7 +33,7 @@ No build step, no packages — the entire server is `server.py`. Tests are in `t
 
 ## Architecture
 
-Two independent feature areas share `server.py`.
+Three independent feature areas share `server.py`.
 
 ### 1. Local storage tools — no network, no Chrome required
 
@@ -81,16 +84,43 @@ Request flow on every call:
 - `search_conversations` is client-side only: fetches all, filters by name substring
 - `link_conversation` with no note attempts auto-generation via `_fetch_and_cache_summary`; silently stores empty note if Chrome is unavailable
 
+### 3. claude.ai Project sync tools — requires Chrome + claude.ai login
+
+Self-contained `context_bridge/` package with its own auth layer:
+
+```
+context_bridge/
+├── auth.py                # Cookie auth + HTTP client (GET/POST/DELETE), 5-min cookie cache
+├── projects_api.py        # Projects CRUD: list projects, list/get/create/delete docs
+├── config.py              # Parse <!-- claude-project: Name --> from CLAUDE.md, UUID cache
+├── content_generator.py   # Generate status/TODOs/session logs from git state
+├── conversations_api.py   # Conversation read tools (not used by server.py, standalone)
+├── push.py                # CLI entry point: python -m context_bridge --auto
+└── __main__.py            # Package runner
+```
+
+**Tools (registered in server.py):** `list_projects`, `list_project_docs`, `get_project_doc`, `push_to_project`, `push_session_summary`, `push_todos`
+
+**Project mapping:** `<!-- claude-project: Name -->` HTML comment in a repo's `CLAUDE.md`. Resolved name → UUID cached in `.claude-project-cache` (gitignored).
+
+**Auto-push:** `hooks/post_push.sh` calls `python -m context_bridge.push --auto` with a 2-minute cooldown.
+
+**Doc naming convention:** `[cli] <Type> - <repo-name>.md` — prevents collisions when multiple repos push to one Project.
+
+**Update strategy:** Upsert = delete existing doc by filename + create new (no PATCH endpoint). Status and TODOs are upserted; session logs are append-only per day.
+
 ## Testing
 
 `test_server.py` covers all local storage tools. The `isolated_storage` fixture (`autouse=True`) monkeypatches `server.STORAGE_DIR` to `tmp_path` for every test — no real `~/.claude-memory/` is touched.
+
+`tests/` covers the `context_bridge` package: auth, config parsing, projects API, content generation, and integration tests. All use mocked HTTP — no live Chrome needed.
 
 Claude.ai API tools are not tested (require a live Chrome session). `get_conversation_summary` is tested via `patch.object(server, "make_api_request", ...)`.
 
 ## Dependencies
 
 - `mcp[cli]` — FastMCP, stdio transport, `@mcp.tool()` decorator
-- `browser_cookie3` — Chrome cookie extraction (conversation tools only)
-- `curl_cffi` — browser-impersonating HTTP client (conversation tools only)
+- `browser_cookie3` — Chrome cookie extraction (conversation + project tools)
+- `curl_cffi` — browser-impersonating HTTP client (conversation + project tools)
 - `pytest` — test runner
 - stdlib — `hashlib`, `re`, `shutil`, `uuid`, `pathlib`, `datetime` (all local tools)

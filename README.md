@@ -2,7 +2,7 @@
 
 ![claude-memory banner](banner.png)
 
-An MCP server that gives Claude Code persistent memory across terminal restarts, context-window compaction, and sessions — and targeted access to relevant Claude Desktop / claude.ai conversations.
+An MCP server that gives Claude Code persistent memory across terminal restarts, context-window compaction, and sessions — targeted access to relevant Claude Desktop / claude.ai conversations — and **bidirectional sync with claude.ai Projects**.
 
 ## Problems Solved
 
@@ -25,6 +25,22 @@ A planning conversation includes the full thought process — questions asked, a
 ### 4. Claude Desktop as your context hub
 
 Configure all integrations (Confluence, Jira, Slack, browser extensions) in Claude Desktop, have conversations that use those tools, then have Claude Code read those conversations — keeping Claude Code lightweight while still accessing rich external context.
+
+### 5. Bidirectional sync with claude.ai Projects
+
+Research in claude.ai, implement in Claude Code, push progress back — all within the same Project. Claude Code pushes status summaries, TODOs, and session logs to your Project's knowledge base. Research done in claude.ai is readable from CLI. Multiple repos can map to one Project.
+
+```
+claude.ai Project
+    ├── [manually added] Research notes, design docs
+    ├── [cli] Status - repo-name.md     ← auto-pushed from CLI
+    ├── [cli] TODOs - repo-name.md      ← pushed from CLI
+    └── Project knowledge docs          ← readable from CLI
+
+CLI (repos with <!-- claude-project: Name --> in CLAUDE.md)
+    ├── reads Project knowledge docs
+    └── pushes status/TODOs automatically
+```
 
 ## Tools
 
@@ -64,6 +80,17 @@ Configure all integrations (Confluence, Jira, Slack, browser extensions) in Clau
 | `get_conversation` | Full conversation content — last resort only |
 | `search_conversations` | Search conversation names/titles |
 | `get_conversation_summary` | First/last messages — **cached to disk, no Chrome needed after first fetch** |
+
+### claude.ai Project sync — requires Chrome login
+
+| Tool | What it does |
+|------|-------------|
+| `list_projects` | List all claude.ai Projects in your organization |
+| `list_project_docs` | List knowledge documents in a Project |
+| `get_project_doc` | Read a specific Project knowledge document |
+| `push_to_project` | Push arbitrary content as a Project knowledge doc |
+| `push_session_summary` | Auto-generate and push status summary from git state |
+| `push_todos` | Push a TODO list to a Project |
 
 ### Garbage collection — all default to `dry_run=True`
 
@@ -199,7 +226,75 @@ Note the returned `image_id` and `stored_path`.
 **After context compaction (if an image is no longer visible):**
 Call `get_image(image_id)` to retrieve the stored path, then use the Read
 tool on `stored_path` to re-embed the image.
+
+## claude.ai Project sync (via claude-memory MCP)
+
+**Setup:** Add `<!-- claude-project: Project Name -->` to this project's
+CLAUDE.md to map it to a claude.ai Project.
+
+**Push progress automatically:**
+After significant milestones, call `push_session_summary` to push a
+git-derived status summary to the Project. Use `push_todos` to share
+the TODO list. Use `push_to_project` for custom content (design notes,
+decisions, research summaries).
+
+**Read Project knowledge:**
+Call `list_project_docs` to see what's in the Project (including docs
+added manually in claude.ai). Call `get_project_doc` to read specific
+documents. This enables research done in claude.ai to flow back into CLI.
 ```
+
+## Bidirectional Project sync
+
+### Setup
+
+Add a project mapping tag to your repository's `CLAUDE.md`:
+
+```markdown
+<!-- claude-project: My Project Name -->
+```
+
+This maps the repo to the claude.ai Project with that name. Multiple repos can map to the same Project.
+
+### Pushing from CLI
+
+```python
+# Push arbitrary content
+push_to_project(content="# Design Notes\n\nWe chose approach B because...", doc_name="design-notes.md")
+
+# Auto-generate and push status from git state
+push_session_summary()
+# → creates "[cli] Status - repo-name.md" with recent commits, branch, ahead count
+
+# Push a TODO list
+push_todos(todos=["[x] Implement auth", "Write tests", "Update docs"])
+# → creates "[cli] TODOs - repo-name.md"
+```
+
+### Reading from CLI
+
+```python
+# List all Projects
+list_projects()
+
+# Browse Project knowledge docs
+list_project_docs()  # uses project from CLAUDE.md
+list_project_docs(project="My Project Name")  # or specify explicitly
+
+# Read a specific doc
+get_project_doc(doc_id="abc-123")
+```
+
+### Automation
+
+Use the included hook script for auto-push on git events:
+
+```bash
+# hooks/post_push.sh — runs: python -m context_bridge.push --auto
+# Configure as a Claude Code PostToolUse hook or git post-commit hook
+```
+
+The auto-push respects a 2-minute cooldown to avoid API spam.
 
 ## Storage
 
@@ -240,15 +335,22 @@ The server reads Chrome's cookies to authenticate with the claude.ai API — no 
 ## Running tests
 
 ```bash
+# Local storage tools (sessions, images, registries)
 pytest test_server.py -v
+
+# Project sync tools (context_bridge package)
+pytest tests/ -v
+
+# All tests
+pytest test_server.py tests/ -v
 ```
 
-Tests cover all local storage tools. Claude.ai API tools require a live Chrome session and are not included.
+`test_server.py` covers all local storage tools. `tests/` covers the Project sync package (auth, config, projects API, content generation). Claude.ai API tools require a live Chrome session and are not unit-tested.
 
 ## Limitations
 
-- **Chrome only** for conversation reading — Safari and Firefox are not supported
-- **Read-only** — conversations cannot be written to or modified
+- **Chrome only** for conversation and Project tools — Safari and Firefox are not supported
+- **Conversations are read-only** — conversations cannot be written to or modified (Project knowledge docs can be written)
 - **File-based images** — `save_image` with no `source_path` stores a description only; clipboard-pasted images with no file path cannot be saved as files
 - **Session expiry** — re-login to Chrome when your claude.ai session expires
 
